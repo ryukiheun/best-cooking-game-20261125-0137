@@ -23,6 +23,8 @@ const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
 const world = createWorld(createRandom(seed));
+// Exposed for automated play-testing only (read score / hands / stations).
+window.__world = world;
 const renderer = createKitchenRenderer(canvas);
 const hud = createHud();
 const input = createInput(canvas);
@@ -49,14 +51,18 @@ function announce(message) {
 
 function playEventSound(event) {
   if (event === 'chop-start' || event === 'chop-done') playChopSound();
-  else if (event === 'pickup' || event === 'pickup-plate' || event === 'place') playPickupSound();
+  else if (event === 'pickup' || event === 'pickup-plate' || event === 'place' || event === 'place-plate') playPickupSound();
   else if (event === 'cook-start' || event === 'cook-done') playSizzleSound();
   else if (event === 'serve') playServeSound();
-  else if (event === 'wrong' || event === 'burnt' || event === 'expire' || event === 'hands-full' || event === 'need-plate' || event === 'need-choppable' || event === 'need-cookable' || event === 'plate-full') playErrorSound();
+  else if (event === 'wrong' || event === 'burnt' || event === 'expire' || event === 'hands-full' || event === 'need-plate' || event === 'need-choppable' || event === 'need-cookable' || event === 'plate-full' || event === 'busy') playErrorSound();
   else if (event === 'tick') playTickSound();
 }
 
 function runShot(name) {
+  document.getElementById('recipe-list').textContent = recipeLegend();
+  // Shots hide the help line: it is text noise for the judge's contact sheet.
+  const help = document.getElementById('help');
+  if (help) help.style.display = 'none';
   const screen = stageShot(name, world);
   let painted = 0;
   function paint() {
@@ -106,9 +112,19 @@ function runGame() {
     if (actions & ACTION_PAUSE && world.screen === SCREEN_PLAY) {
       world.screen = SCREEN_PAUSED;
       announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && world.screen === SCREEN_PAUSED) {
+      return;
+    }
+    if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && world.screen === SCREEN_PAUSED) {
+      // Resume only: the same Space must not also fire the station in
+      // front of the chef on the resume frame (M2).
       world.screen = SCREEN_PLAY;
       announce('Playing.');
+      return;
+    }
+    // M3: R restarts mid-shift too, matching the "R restart" help text.
+    if (world.screen === SCREEN_PLAY && (actions & ACTION_RESTART)) {
+      startShift();
+      return;
     }
     if (world.screen === SCREEN_PLAY && (actions & ACTION_CONFIRM)) pendingUse = true;
     if (world.screen === SCREEN_PLAY && clicked) {

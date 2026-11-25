@@ -16,7 +16,7 @@ export function createWorld(random) {
   return {
     random,
     screen: SCREEN_TITLE,
-    chef: createChef(10, 4),
+    chef: createChef(10, 6),
     stations: buildStations(),
     board: createOrderBoard(random),
     plate: [],
@@ -32,8 +32,21 @@ export function createWorld(random) {
 }
 
 export function resetWorld(world) {
+  // Keep the station objects: render.js keys its progress bars and flames
+  // by station identity, so replacing them would hide every bar after the
+  // first shift starts (B2). Reset each station in place instead.
+  const stations = world.stations;
   const fresh = createWorld(world.random);
   Object.assign(world, fresh);
+  world.stations = stations;
+  for (const station of stations) {
+    station.progress = 0;
+    station.item = null;
+    station.busy = false;
+    station.ready = false;
+    station.done = false;
+  }
+  world.servePlate = null;
   world.screen = SCREEN_PLAY;
 }
 
@@ -79,7 +92,10 @@ export function useStation(world, station) {
       station.ready = false;
       return 'pickup';
     }
-    if (station.busy) return null;
+    if (station.busy) {
+      setMessage(world, 'Still chopping…');
+      return 'busy';
+    }
     if (!chef.carrying || !isChoppable(chef.carrying)) return 'need-choppable';
     station.item = chef.carrying;
     chef.carrying = null;
@@ -90,13 +106,24 @@ export function useStation(world, station) {
   if (station.kind === STATION_KIND.STOVE) {
     if (station.done) {
       if (chef.carrying || chef.plate) return 'hands-full';
+      if (station.item == null) {
+        // Defensive: a done stove with nothing on it is an empty stove.
+        station.done = false;
+        station.busy = false;
+        station.progress = 0;
+        return null;
+      }
       chef.carrying = station.item;
       station.item = null;
       station.done = false;
+      station.busy = false; // B1: without this, tickCooking re-completes a null item.
       station.progress = 0;
       return 'pickup';
     }
-    if (station.busy) return null;
+    if (station.busy) {
+      setMessage(world, 'Still cooking…');
+      return 'busy';
+    }
     if (!chef.carrying || !isCookable(chef.carrying)) return 'need-cookable';
     station.item = chef.carrying;
     chef.carrying = null;
@@ -107,6 +134,13 @@ export function useStation(world, station) {
   }
   if (station.kind === STATION_KIND.ASSEMBLY) {
     if (chef.plate) {
+      // Put a carried plate back down on an empty counter to add more.
+      if (world.plate.length === 0) {
+        world.plate = [...chef.plate];
+        chef.plate = null;
+        refreshPlate(world);
+        return 'place-plate';
+      }
       setMessage(world, 'Hands full — serve the plate first.');
       return 'hands-full';
     }
@@ -127,10 +161,13 @@ export function useStation(world, station) {
     if (!chef.plate) return 'need-plate';
     const order = findMatchingOrder(world.board, chef.plate);
     if (!order) {
+      const served = chef.plate.map((item) => finishedName(item)).join(' + ');
+      const closest = world.board.active[0];
+      const needs = closest ? closest.recipe.needs.map((item) => finishedName(item)).join(' + ') : '—';
       world.score = Math.max(0, world.score - SCORE.wrongServePenalty);
       world.board.combo = 0;
       chef.plate = null;
-      setMessage(world, 'Wrong dish! The guests sent it back. -50');
+      setMessage(world, `Wrong dish! You served ${served} — next ticket needs ${needs}. -50`);
       return 'wrong';
     }
     const earned = serveOrder(world.board, order);
@@ -150,16 +187,64 @@ export function refreshPlate(world) {
 function walkToward(world, target) {
   const chef = world.chef;
   if (chef.moving) return;
-  const dCol = target.col - chef.col;
-  const dRow = target.row - chef.row;
-  const axes = Math.abs(dCol) >= Math.abs(dRow)
-    ? [[Math.sign(dCol), 0, dCol > 0 ? 'right' : 'left'], [0, Math.sign(dRow), dRow > 0 ? 'down' : 'up']]
-    : [[0, Math.sign(dRow), dRow > 0 ? 'down' : 'up'], [Math.sign(dCol), 0, dCol > 0 ? 'right' : 'left']];
-  for (const [stepCol, stepRow, direction] of axes) {
-    if (stepCol === 0 && stepRow === 0) continue;
-    if (chefTryStep(chef, stepCol, stepRow, direction, (col, row) => isWalkable(world, col, row))) return;
+  // BFS around counters: a straight-line step stalls when the preferred
+  // axis is blocked (the island sits on the direct column), so find a real
+  // path to any tile beside the target station (or to the target tile).
+  const goalTiles = new Set();
+  if (target.station) {
+    for (const [dCol, dRow] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const col = target.station.col + dCol;
+      const row = target.station.row + dRow;
+      if (isWalkable(world, col, row)) goalTiles.add(`${col},${row}`);
+    }
+  } else if (isWalkable(world, target.col, target.row)) {
+    goalTiles.add(`${target.col},${target.row}`);
   }
-  world.autoTarget = null;
+  if (goalTiles.size === 0) {
+    world.autoTarget = null;
+    return;
+  }
+  const startKey = `${chef.col},${chef.row}`;
+  if (goalTiles.has(startKey)) return;
+  const previous = new Map([[startKey, null]]);
+  const queue = [[chef.col, chef.row]];
+  let found = null;
+  while (queue.length > 0 && found === null) {
+    const [col, row] = queue.shift();
+    for (const [dCol, dRow] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nextCol = col + dCol;
+      const nextRow = row + dRow;
+      const key = `${nextCol},${nextRow}`;
+      if (previous.has(key) || !isWalkable(world, nextCol, nextRow)) continue;
+      previous.set(key, [col, row]);
+      if (goalTiles.has(key)) {
+        found = [nextCol, nextRow];
+        break;
+      }
+      queue.push([nextCol, nextRow]);
+    }
+  }
+  if (!found) {
+    world.autoTarget = null;
+    return;
+  }
+  // Reconstruct start -> found, then take the first step off the start tile.
+  const path = [found];
+  let cursor = found;
+  while (!(cursor[0] === chef.col && cursor[1] === chef.row)) {
+    cursor = previous.get(`${cursor[0]},${cursor[1]}`);
+    if (!cursor) break;
+    path.unshift(cursor);
+  }
+  const step = path[1];
+  if (!step) {
+    world.autoTarget = null;
+    return;
+  }
+  const dCol = step[0] - chef.col;
+  const dRow = step[1] - chef.row;
+  const direction = dCol > 0 ? 'right' : dCol < 0 ? 'left' : dRow > 0 ? 'down' : 'up';
+  chefTryStep(chef, dCol, dRow, direction, (col, row) => isWalkable(world, col, row));
 }
 
 export function stepWorld(world, step, move, usePressed, clickTarget) {
@@ -229,6 +314,7 @@ export function stepWorld(world, step, move, usePressed, clickTarget) {
     if (station.kind === STATION_KIND.STOVE && station.busy) {
       const result = tickCooking(station, step);
       if (result === 'done') {
+        if (station.item == null) continue; // guard: never cook a null item
         station.item = cookedName(station.item);
         events.push('cook-done');
         setMessage(world, `${finishedName(station.item)} is cooked — grab it before it burns!`);
@@ -239,10 +325,11 @@ export function stepWorld(world, step, move, usePressed, clickTarget) {
     }
   }
 
-  if (updateOrderBoard(world.board, step)) {
-    world.score = Math.max(0, world.score - ORDER.expirePenalty);
+  const expiredCount = updateOrderBoard(world.board, step);
+  if (expiredCount > 0) {
+    world.score = Math.max(0, world.score - ORDER.expirePenalty * expiredCount);
     events.push('expire');
-    setMessage(world, 'An order walked out. -40');
+    setMessage(world, expiredCount > 1 ? `${expiredCount} orders walked out. -${ORDER.expirePenalty * expiredCount}` : 'An order walked out. -40');
   }
   refreshPlate(world);
 

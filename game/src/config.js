@@ -69,11 +69,13 @@ export const SCORE = {
 };
 
 export const PALETTE = {
-  floorLight: '#f7e8c8',
-  floorDark: '#efdcb2',
+  floorLight: '#f0c078',
+  floorDark: '#dfa458',
   wall: '#c96f3f',
   counter: '#8a5a33',
   counterTop: '#b5773f',
+  islandTop: '#a06a35',
+  rug: '#b03a2e',
   board: '#fff6e0',
   text: '#2b1d12',
   cream: '#fff8e7',

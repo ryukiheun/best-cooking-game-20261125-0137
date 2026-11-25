@@ -6,7 +6,7 @@ import { INGREDIENTS, RECIPES } from './config.js';
 
 function itemChip(item) {
   const base = item.replace('_chopped', '').replace('_cooked', '');
-  const info = INGREDIENTS[base];
+  const info = INGREDIENTS[base] || { name: item, color: '#999999' };
   const suffix = item.endsWith('_chopped') ? ' (cut)' : item.endsWith('_cooked') ? ' (hot)' : '';
   return `<span class="chip" style="--dot:${info.color}">${info.name}${suffix}</span>`;
 }
@@ -32,6 +32,8 @@ export function createHud() {
     overServed: document.getElementById('over-served'),
     best: document.getElementById('best-line'),
     best2: document.getElementById('best-line2'),
+    help: document.getElementById('help'),
+    bottombar: document.getElementById('bottombar'),
   };
 }
 
@@ -58,13 +60,13 @@ export function drawHud(hud, world, best) {
   hud.timer.textContent = formatClock(world.timeLeft);
   hud.timer.classList.toggle('low', world.timeLeft <= 30);
   hud.score.textContent = String(world.score);
-  hud.coins.textContent = `🪙 ${world.coins}`;
+  hud.coins.innerHTML = '<span class="coin-dot"></span> ' + world.coins;
   hud.combo.textContent = world.board.combo > 1 ? `COMBO x${world.board.combo}` : '';
   const chef = world.chef;
   const held = chef.carrying
     ? itemChip(chef.carrying)
     : chef.plate
-      ? `🍽 ${chef.plate.map(itemChip).join('')}`
+      ? `Plate: ${chef.plate.map(itemChip).join('')}`
       : '<span class="empty">empty hands</span>';
   hud.hands.innerHTML = `Hands: ${held}`;
   hud.plate.innerHTML = world.plate.length

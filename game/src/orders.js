@@ -76,16 +76,16 @@ export function updateOrderBoard(board, step) {
     addOrder(board);
     board.spawnTimer = ORDER.spawnSeconds;
   }
-  let expired = false;
+  let expiredCount = 0;
   for (const order of [...board.active]) {
     order.patience -= step;
     if (order.patience <= 0) {
       board.active = board.active.filter((entry) => entry.id !== order.id);
       board.expired += 1;
       board.combo = 0;
-      expired = true;
+      expiredCount += 1;
       addOrder(board);
     }
   }
-  return expired;
+  return expiredCount;
 }
