@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ember &amp; Ladle — Hearthside Rush</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b1d12; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: 112px; display: flex; align-items: stretch; gap: 10px; padding: 8px 12px; background: linear-gradient(#7a3b1e, #5d2c15); color: #fff8e7; box-sizing: border-box; z-index: 5; }
+  #brand { width: 170px; display: flex; flex-direction: column; justify-content: center; }
+  #brand b { font-size: 22px; letter-spacing: 1px; color: #ffd97a; }
+  #brand span { font-size: 12px; opacity: 0.85; }
+  #orders { flex: 1; display: flex; gap: 10px; }
+  .ticket { flex: 1; background: #fff6e0; color: #2b1d12; border-radius: 8px; padding: 6px 10px; box-shadow: 0 3px 0 rgba(0,0,0,0.35); min-width: 0; }
+  .ticket.urgent { outline: 3px solid #d9382b; }
+  .ticket-name { font-weight: 800; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ticket-needs { margin-top: 2px; display: flex; gap: 3px; flex-wrap: nowrap; }
+  .chip { display: inline-block; background: #f1e2c0; color: #2b1d12; border-radius: 10px; padding: 1px 5px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .chip::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--dot, #999); margin-right: 4px; }
+  .patience { height: 7px; background: #e0cba0; border-radius: 4px; margin-top: 5px; overflow: hidden; }
+  .patience i { display: block; height: 100%; background: #3f9e4d; }
+  .ticket.urgent .patience i { background: #d9382b; }
+  .ticket-price { font-size: 12px; font-weight: 800; color: #8a5a33; margin-top: 2px; }
+  #clockbox { width: 210px; text-align: right; display: flex; flex-direction: column; justify-content: center; }
+  #timer { font-size: 44px; font-weight: 900; line-height: 1; color: #fff; }
+  #timer.low { color: #ff6b5e; }
+  #score-line { font-size: 17px; font-weight: 700; margin-top: 2px; }
+  #coins { color: #ffd97a; margin-left: 8px; }
+  #combo { font-size: 15px; font-weight: 900; color: #ffd97a; min-height: 18px; }
+  #bottombar { position: fixed; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: rgba(43,29,18,0.92); color: #ffe9b0; font-size: 15px; z-index: 5; box-sizing: border-box; white-space: nowrap; overflow: hidden; }
+  #bottombar .ready { color: #7be495; }
+  #toast { font-weight: 800; color: #fff; }
+  #help { margin-left: auto; opacity: 0.8; font-size: 13px; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(43,29,18,0.35); z-index: 10; }
+  .panel { background: #fff6e0; color: #2b1d12; border-radius: 14px; padding: 28px 40px; text-align: center; box-shadow: 0 10px 0 rgba(0,0,0,0.4); max-width: 640px; }
+  .panel h1 { margin: 0 0 6px; font-size: 44px; color: #d94f2b; }
+  .panel h2 { margin: 0 0 10px; font-size: 32px; }
+  .panel p { font-size: 17px; line-height: 1.5; margin: 8px 0; }
+  .panel .big { font-size: 26px; font-weight: 900; }
+  .panel .key { display: inline-block; background: #2b1d12; color: #ffe9b0; border-radius: 6px; padding: 2px 9px; font-weight: 800; }
+  .hidden { display: none; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game" aria-label="Ember and Ladle: a timed cooking game. Move the chef with WASD or arrow keys, press Space or E to use stations, serve matching dishes at the window."></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+<div id="topbar">
+  <div id="brand"><b>🔥 EMBER &amp; LADLE</b><span>Hearthside Rush · 150s shift</span></div>
+  <div id="orders"></div>
+  <div id="clockbox">
+    <div id="timer">2:30</div>
+    <div id="score-line">SCORE <span id="score">0</span><span id="coins">🪙 0</span></div>
+    <div id="combo"></div>
+  </div>
+</div>
+<div id="bottombar">
+  <span id="hands">Hands: empty hands</span>
+  <span id="plate">Plate on counter: —</span>
+  <span id="toast"></span>
+  <span id="help">WASD move · Space / E use · Click a station · P pause · R restart</span>
+</div>
+<div id="title-screen" class="overlay">
+  <div class="panel">
+    <h1>🔥 EMBER &amp; LADLE</h1>
+    <p><b>Hearthside Rush</b> — the lunch rush is on. Grab ingredients from the crates, chop them on the boards, cook them on the stoves, build each plate on the assembly counter, and serve it at the golden window before the ticket's patience runs out.</p>
+    <p id="recipe-list"></p>
+    <p><span class="key">WASD / ←↑↓→</span> move &nbsp; <span class="key">Space / E</span> use station &nbsp; <span class="key">Click</span> walk to a station &nbsp; <span class="key">P</span> pause &nbsp; <span class="key">R</span> restart</p>
+    <p class="big">Press Space or click to start the shift</p>
+    <p id="best-line"></p>
+  </div>
+</div>
+<div id="pause-screen" class="overlay hidden">
+  <div class="panel"><h2>Paused</h2><p>Press <span class="key">P</span> or <span class="key">Space</span> to keep cooking.</p></div>
+</div>
+<div id="over-screen" class="overlay hidden">
+  <div class="panel">
+    <h2>Shift Complete! 🍽</h2>
+    <p class="big" id="over-score">Score: 0</p>
+    <p id="over-served"></p>
+    <p>Press <span class="key">R</span> or click to cook another shift.</p>
+    <p id="best-line2"></p>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
